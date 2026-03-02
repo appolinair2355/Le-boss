@@ -3,45 +3,35 @@ Configuration du bot Telegram de prédiction Baccarat
 """
 import os
 
-def parse_channel_id(env_var: str, default: str = None) -> int:
-    value = os.getenv(env_var, default)
-    if value is None:
-        raise ValueError(f"Variable d'environnement {env_var} manquante !")
+def parse_channel_id(env_var: str, default: str) -> int:
+    value = os.getenv(env_var) or default
     channel_id = int(value)
     if channel_id > 0 and len(str(channel_id)) >= 10:
         channel_id = -channel_id
     return channel_id
 
-def get_env_or_raise(key: str) -> str:
-    """Oblige la présence de la variable d'environnement"""
-    value = os.getenv(key)
-    if not value:
-        raise ValueError(f"Variable d'environnement {key} manquante !")
-    return value
+# Identifiants des canaux
+SOURCE_CHANNEL_ID = parse_channel_id('SOURCE_CHANNEL_ID', '-1002682552255')
+PREDICTION_CHANNEL_ID = parse_channel_id('PREDICTION_CHANNEL_ID', '-1003664468884')
 
-# Credentials Telegram API (OBLIGATOIRES - pas de valeur par défaut)
-API_ID = int(get_env_or_raise('API_ID'))
-API_HASH = get_env_or_raise('API_HASH')
-BOT_TOKEN = get_env_or_raise('BOT_TOKEN')
+# Identifiant de l'administrateur
+ADMIN_ID = int(os.getenv('ADMIN_ID') or '6180384006')
 
-# Identifiant de l'administrateur (OBLIGATOIRE)
-ADMIN_ID = int(get_env_or_raise('ADMIN_ID'))
+# Credentials Telegram API
+API_ID = int(os.getenv('API_ID') or '29177661')
+API_HASH = os.getenv('API_HASH') or 'a8639172fa8d35dbfd8ea46286d349ab'
+BOT_TOKEN = os.getenv('BOT_TOKEN') or '8670864890:AAEt05Nxw6_7vEsoamDVmridx5X5xRUHQGM'
 
-# Identifiants des canaux (OBLIGATOIRES)
-SOURCE_CHANNEL_ID = parse_channel_id('SOURCE_CHANNEL_ID')
-PREDICTION_CHANNEL_ID = parse_channel_id('PREDICTION_CHANNEL_ID')
-STATS_CHANNEL_ID = parse_channel_id('STATS_CHANNEL_ID', '-1002682552255')  # Optionnel avec défaut
-
-# Port pour le serveur web (Render.com utilise 10000)
-PORT = int(os.getenv('PORT', '10000'))
+# Port pour le serveur web (Replit utilise 5000 pour webview, Render utilise 10000)
+PORT = int(os.getenv('PORT') or '10000')
 
 # Paramètre 'a' pour la prédiction (nombre entier naturel, défaut = 2)
-PREDICTION_OFFSET = int(os.getenv('PREDICTION_OFFSET', '2'))
+PREDICTION_OFFSET = int(os.getenv('PREDICTION_OFFSET') or '2')
 
-# Session string Telethon (optionnel, auto-générée si vide)
-TELEGRAM_SESSION = os.getenv('TELEGRAM_SESSION', '')
+# ID du canal de statistiques (pour vérification des résultats)
+STATS_CHANNEL_ID = parse_channel_id('STATS_CHANNEL_ID', '-1002682552255')
 
-# Mapping des couleurs (constantes, pas besoin d'env var)
+# Mapping des couleurs
 SUIT_MAPPING = {
     '♠️': '❤️',
     '♠': '❤️',
@@ -55,8 +45,10 @@ SUIT_MAPPING = {
     '♦': '♣️'
 }
 
+# Liste des couleurs disponibles
 ALL_SUITS = ['♠', '♥', '♦', '♣']
 
+# Affichage des couleurs avec emoji
 SUIT_DISPLAY = {
     '♠': '♠️',
     '♥': '❤️',
@@ -64,5 +56,16 @@ SUIT_DISPLAY = {
     '♣': '♣️'
 }
 
-SUIT
-
+# Noms complets des couleurs
+SUIT_NAMES = {
+    '♠️': 'Pique',
+    '♠': 'Pique',
+    '❤️': 'Cœur',
+    '❤': 'Cœur',
+    '♥️': 'Cœur',
+    '♥': 'Cœur',
+    '♦️': 'carreaux',
+    '♦': 'carreaux',
+    '♣️': 'trèfle',
+    '♣': 'trèfle'
+}

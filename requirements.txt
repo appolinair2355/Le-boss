@@ -1,3 +1,6 @@
 telethon
 aiohttp
 cryptg
+aiohttp
+cryptg
+telethon
