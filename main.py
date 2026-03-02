@@ -139,7 +139,8 @@ async def reset_bot_state():
     except Exception as e:
         logger.error(f"Erreur envoi notification nouveau cycle: {e}")
 
-def ma_fonction():
+async def ma_fonction():  # ← ajoute "async"
+    pred_msg = await client.send_message(...):
     global prediction_channel_ok  # ← global en PREMIER
     prediction_channel_ok = True  # ← puis utilisation  
     # 🔧 CORRECTION: Logs de diagnostic détaillés
