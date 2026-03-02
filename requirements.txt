@@ -1,4 +1,4 @@
 telethon==1.33.1
 aiohttp==3.9.1
-cryptography==41.0.8
+cryptography
 
