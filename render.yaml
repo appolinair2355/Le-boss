@@ -1,25 +1,15 @@
 services:
-  - type: worker
-    name: baccarat-bot
-    env: python
+  - type: web
+    name: telegram-prediction-bot
+    runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: PORT
         value: 10000
-      - key: API_ID
-        sync: false
-      - key: API_HASH
-        sync: false
-      - key: BOT_TOKEN
-        sync: false
-      - key: ADMIN_ID
-        sync: false
-      - key: SOURCE_CHANNEL_ID
-        sync: false
-      - key: PREDICTION_CHANNEL_ID
-        sync: false
-      - key: STATS_CHANNEL_ID
-        sync: false
-      - key: TELEGRAM_SESSION
-        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
+        
