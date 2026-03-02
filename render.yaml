@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: baccarat-bot
+    runtime: python
+    envVars:
+      - key: API_ID
+        value: "29177661"
+      - key: API_HASH
+        value: "a8639172fa8d35dbfd8ea46286d349ab"
+      # ... etc
+      
