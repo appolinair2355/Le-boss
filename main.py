@@ -180,6 +180,31 @@ async def reset_bot_state():
     logger.info("✅ Reset manuel terminé")
 
 # ============================================================
+# FONCTION DE LIBÉRATION FORCÉE (séparée pour éviter global dans condition)
+# ============================================================
+
+async def force_unlock_system():
+    """Libère le système immédiatement"""
+    global active_prediction, waiting_for_finalization, verification_counter, last_prediction_time, timeout_task
+    
+    old_pred = active_prediction['target_game'] if active_prediction else None
+    
+    if timeout_task:
+        timeout_task.cancel()
+        try:
+            await timeout_task
+        except asyncio.CancelledError:
+            pass
+        timeout_task = None
+    
+    active_prediction = None
+    waiting_for_finalization = False
+    verification_counter = 0
+    last_prediction_time = None
+    
+    return old_pred
+
+# ============================================================
 # ENVOI ET MISE À JOUR DES PRÉDICTIONS
 # ============================================================
 
@@ -272,7 +297,6 @@ async def update_status(target_game, success, count=0):
 @client.on(events.NewMessage())
 async def handle_new(event):
     global verification_counter, current_game_number
-    global active_prediction, waiting_for_finalization
     
     chat_id = event.chat_id
     message_id = event.message.id
@@ -375,18 +399,7 @@ async def handle_commands(event):
         await event.respond("✅ **Reset manuel**\nDonnées effacées.")
     
     elif cmd == '/forceunlock':
-        global active_prediction, waiting_for_finalization, verification_counter
-        
-        old_pred = active_prediction['target_game'] if active_prediction else None
-        
-        if timeout_task:
-            timeout_task.cancel()
-        
-        active_prediction = None
-        waiting_for_finalization = False
-        verification_counter = 0
-        last_prediction_time = None
-        
+        old_pred = await force_unlock_system()
         await event.respond(f"🔓 **FORCÉ!**\n#{old_pred} annulée.\nSystème libre.")
 
 # ============================================================
