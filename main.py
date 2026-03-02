@@ -139,47 +139,39 @@ async def reset_bot_state():
     except Exception as e:
         logger.error(f"Erreur envoi notification nouveau cycle: {e}")
 
-async def ma_fonction():  # ← ajoute "async"
-    pred_msg = await client.send_message(...):
-    global prediction_channel_ok  # ← global en PREMIER
-    prediction_channel_ok = True  # ← puis utilisation  
-    # 🔧 CORRECTION: Logs de diagnostic détaillés
+async def send_prediction(game_number: int, suit: str):
+    global prediction_channel_ok, active_prediction, waiting_for_finalization
+
     logger.info(f"🔍 TENTATIVE ENVOI PRÉDICTION:")
     logger.info(f"   - Game: #{game_number}")
     logger.info(f"   - Suit: {suit}")
     logger.info(f"   - PREDICTION_CHANNEL_ID: {PREDICTION_CHANNEL_ID}")
     logger.info(f"   - prediction_channel_ok: {prediction_channel_ok}")
     logger.info(f"   - STATS_CHANNEL_ID: {STATS_CHANNEL_ID}")
-    
-    # 🔧 CORRECTION: Vérification explicite des conditions
+
     if not PREDICTION_CHANNEL_ID or PREDICTION_CHANNEL_ID == 0:
         logger.error("❌ ERREUR: PREDICTION_CHANNEL_ID non configuré")
         return None
-    
-    # 🔧 CORRECTION: Forcer l'envoi même si prediction_channel_ok est False (tentative de recovery)
+
     if not prediction_channel_ok:
         logger.warning("⚠️ prediction_channel_ok est False, tentative d'envoi quand même...")
-    
+
     try:
         target_game = game_number + PREDICTION_OFFSET
         suit_name = get_suit_full_name(suit)
-        
+
         prediction_msg = f"📡 PRÉDICTION #{target_game}\n🎯 Couleur: {suit} {suit_name}\n🌪️ Statut: ⏳ EN COURS"
 
         msg_id = 0
-        
-        # 🔧 CORRECTION: Try/catch spécifique pour l'envoi avec retry
+
         try:
             pred_msg = await client.send_message(PREDICTION_CHANNEL_ID, prediction_msg)
             msg_id = pred_msg.id
             logger.info(f"✅ Prédiction envoyée avec succès: Jeu #{target_game} - {suit} (Msg ID: {msg_id})")
-            # Si l'envoi réussit, on met à jour le flag
-            global prediction_channel_ok
             prediction_channel_ok = True
         except Exception as send_error:
             logger.error(f"❌ ERREUR ENVOI PRÉDICTION: {send_error}")
             logger.error(f"   Type: {type(send_error).__name__}")
-            # Tentative avec get_entity si l'ID pose problème
             try:
                 logger.info("🔄 Tentative avec get_entity...")
                 entity = await client.get_entity(PREDICTION_CHANNEL_ID)
@@ -201,7 +193,7 @@ async def ma_fonction():  # ← ajoute "async"
             'created_at': datetime.now().isoformat()
         }
         waiting_for_finalization = True
-        
+
         logger.info(f"🎯 Prédiction active créée: Jeu #{target_game} - {suit} (basé sur #{game_number})")
         return msg_id
 
