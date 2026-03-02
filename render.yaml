@@ -1,11 +1,25 @@
 services:
-  - type: web
+  - type: worker
     name: baccarat-bot
-    runtime: python
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
+      - key: PORT
+        value: 10000
       - key: API_ID
-        value: "29177661"
+        sync: false
       - key: API_HASH
-        value: "a8639172fa8d35dbfd8ea46286d349ab"
-      # ... etc
-      
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: SOURCE_CHANNEL_ID
+        sync: false
+      - key: PREDICTION_CHANNEL_ID
+        sync: false
+      - key: STATS_CHANNEL_ID
+        sync: false
+      - key: TELEGRAM_SESSION
+        sync: false
