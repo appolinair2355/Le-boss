@@ -139,9 +139,9 @@ async def reset_bot_state():
     except Exception as e:
         logger.error(f"Erreur envoi notification nouveau cycle: {e}")
 
-async def send_prediction(game_number: int, suit: str):
-    global active_prediction, waiting_for_finalization, prediction_channel_ok
-    
+def ma_fonction():
+    global prediction_channel_ok  # ← global en PREMIER
+    prediction_channel_ok = True  # ← puis utilisation  
     # 🔧 CORRECTION: Logs de diagnostic détaillés
     logger.info(f"🔍 TENTATIVE ENVOI PRÉDICTION:")
     logger.info(f"   - Game: #{game_number}")
