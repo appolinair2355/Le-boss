@@ -13,12 +13,14 @@ from config import (
     SUIT_MAPPING, ALL_SUITS, SUIT_DISPLAY, SUIT_NAMES, PREDICTION_OFFSET
 )
 
+# Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-logger = logging.getLogger(name)
+# CORRECTION : Utilisation de __name__ au lieu de name
+logger = logging.getLogger(__name__)
 
 if not API_ID or API_ID == 0:
     logger.error("API_ID manquant")
@@ -83,6 +85,7 @@ def has_suit_in_group(group_str: str, target_suit: str) -> bool:
         if suit in target_normalized and suit in normalized:
             return True
     return False
+
 async def send_prediction(game_number: int, suit: str):
     global active_prediction, waiting_for_finalization
     
@@ -169,6 +172,7 @@ async def update_prediction_status(target_game: int, new_status: str, check_coun
     except Exception as e:
         logger.error(f"Erreur mise à jour prédiction: {e}")
         return False
+
 async def check_prediction_result(game_number: int, first_group: str):
     global active_prediction
     
@@ -472,7 +476,8 @@ async def main():
     finally:
         await client.disconnect()
 
-if name == 'main':
+# CORRECTION : Utilisation de __name__ et '__main__'
+if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
