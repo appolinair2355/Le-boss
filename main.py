@@ -3,27 +3,17 @@ import asyncio
 import re
 import logging
 import sys
-import json
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import PeerChannel
 from aiohttp import web
+from config import (
+    API_ID, API_HASH, BOT_TOKEN, ADMIN_ID,
+    SOURCE_CHANNEL_ID, PREDICTION_CHANNEL_ID, PORT,
+    SUIT_MAPPING, ALL_SUITS, SUIT_DISPLAY, SUIT_NAMES, PREDICTION_OFFSET
+)
 
-# Importation sécurisée de la config
-try:
-    from config import (
-        API_ID, API_HASH, BOT_TOKEN, ADMIN_ID,
-        SOURCE_CHANNEL_ID, PREDICTION_CHANNEL_ID, PORT,
-        SUIT_MAPPING, ALL_SUITS, SUIT_DISPLAY, SUIT_NAMES, PREDICTION_OFFSET
-    )
-except ImportError:
-    logger.error("Fichier config.py introuvable !")
-    sys.exit(1)
-
-# ==========================================
-# CONFIGURATION DU LOGGING
-# ==========================================
+# Configuration du logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -31,13 +21,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# VARIABLES D'ÉTAT GLOBALES
-# ==========================================
-# On utilise les IDs de config comme base, mais on pourra les changer
-CURRENT_SOURCE_ID = SOURCE_CHANNEL_ID
-CURRENT_PRED_ID = PREDICTION_CHANNEL_ID
+if not API_ID or API_ID == 0:
+    logger.error("API_ID manquant")
+    exit(1)
+if not API_HASH:
+    logger.error("API_HASH manquant")
+    exit(1)
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN manquant")
+    exit(1)
 
+logger.info(f"Configuration initiale: SOURCE={SOURCE_CHANNEL_ID}, PREDICTION={PREDICTION_CHANNEL_ID}")
+
+session_string = os.getenv('TELEGRAM_SESSION', '')
+client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
+
+# --- Variables Globales ---
 active_prediction = None
 recent_games = {}
 processed_messages = set()
@@ -45,197 +44,286 @@ current_game_number = 0
 waiting_for_finalization = False
 source_channel_ok = False
 prediction_channel_ok = False
-start_time = datetime.now()
 
-client = TelegramClient(StringSession(os.getenv('TELEGRAM_SESSION', '')), API_ID, API_HASH)
-
-# ==========================================
-# FONCTIONS DE TRAITEMENT
-# ==========================================
+# --- Fonctions Utilitaires ---
 
 def extract_game_number(message: str):
     match = re.search(r"#N\s*(\d+)\.?", message, re.IGNORECASE)
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    return None
 
 def extract_parentheses_groups(message: str):
     return re.findall(r"\(([^)]*)\)", message)
 
 def normalize_suits(text: str) -> str:
-    n = text.replace('❤️', '♥').replace('❤', '♥').replace('♥️', '♥')
-    return n.replace('♠️', '♠').replace('♦️', '♦').replace('♣️', '♣')
+    normalized = text.replace('❤️', '♥').replace('❤', '♥').replace('♥️', '♥')
+    normalized = normalized.replace('♠️', '♠').replace('♦️', '♦').replace('♣️', '♣')
+    return normalized
 
-def get_first_card_suit(group: str) -> str:
-    norm = normalize_suits(group)
-    match = re.search(r"[0-9AJQKajqk]+\s*([♠♥♦♣])", norm)
+def get_first_card_suit(first_group: str) -> str:
+    normalized = normalize_suits(first_group)
+    match = re.search(r"[0-9AJQKajqk]+\s*([♠♥♦♣])", normalized)
     if match:
         suit = match.group(1)
         return SUIT_DISPLAY.get(suit, suit)
-    for s in ALL_SUITS:
-        if s in norm: return SUIT_DISPLAY.get(s, s)
+    for suit in ALL_SUITS:
+        if suit in normalized:
+            return SUIT_DISPLAY.get(suit, suit)
     return None
 
-def has_suit_in_group(group_str: str, target_suit: str) -> bool:
-    norm = normalize_suits(group_str)
-    target = normalize_suits(target_suit)
-    return any(s in target and s in norm for s in ALL_SUITS)
+def get_suit_full_name(suit: str) -> str:
+    return SUIT_NAMES.get(suit, suit)
 
-# ==========================================
-# LOGIQUE DE PRÉDICTION
-# ==========================================
+def is_message_finalized(message: str) -> bool:
+    if '⏰' in message:
+        return False
+    return '✅' in message or '🔰' in message
+
+def has_suit_in_group(group_str: str, target_suit: str) -> bool:
+    normalized = normalize_suits(group_str)
+    target_normalized = normalize_suits(target_suit)
+    for suit in ALL_SUITS:
+        if suit in target_normalized and suit in normalized:
+            return True
+    return False
+
+# --- Gestion des Prédictions ---
 
 async def send_prediction(game_number: int, suit: str):
     global active_prediction, waiting_for_finalization
+    
     try:
         target_game = game_number + PREDICTION_OFFSET
-        suit_name = SUIT_NAMES.get(suit, suit)
-        msg = f"📡 **PRÉDICTION #{target_game}**\n🎯 Couleur: {suit} {suit_name}\n🌪️ Statut: ⏳ EN COURS"
+        suit_name = get_suit_full_name(suit)
+        
+        prediction_msg = f"📡 PRÉDICTION #{target_game}\n🎯 Couleur: {suit} {suit_name}\n🌪️ Statut: ⏳ EN COURS"
 
-        if prediction_channel_ok:
-            pred_msg = await client.send_message(CURRENT_PRED_ID, msg)
-            active_prediction = {
-                'source_game': game_number, 'target_game': target_game,
-                'suit': suit, 'message_id': pred_msg.id, 'check_count': 0
-            }
-            waiting_for_finalization = True
-            logger.info(f"✅ Prédiction envoyée pour #{target_game}")
+        msg_id = 0
+        if PREDICTION_CHANNEL_ID and PREDICTION_CHANNEL_ID != 0 and prediction_channel_ok:
+            try:
+                pred_msg = await client.send_message(PREDICTION_CHANNEL_ID, prediction_msg)
+                msg_id = pred_msg.id
+                logger.info(f"✅ Prédiction envoyée: Jeu #{target_game} sur canal {PREDICTION_CHANNEL_ID}")
+            except Exception as e:
+                logger.error(f"❌ Erreur envoi prédiction: {e}")
+                return None
+        else:
+            logger.warning("⚠️ Canal de prédiction non configuré ou inaccessible")
+            return None
+
+        active_prediction = {
+            'source_game': game_number,
+            'target_game': target_game,
+            'suit': suit,
+            'message_id': msg_id,
+            'status': '⏳',
+            'check_count': 0,
+            'created_at': datetime.now().isoformat()
+        }
+        waiting_for_finalization = True
+        return msg_id
+
     except Exception as e:
-        logger.error(f"Erreur envoi: {e}")
+        logger.error(f"Erreur send_prediction: {e}")
+        return None
 
-async def update_status(target_game, status, count=0):
+async def update_prediction_status(target_game: int, new_status: str, check_count: int = 0):
     global active_prediction, waiting_for_finalization
-    if not active_prediction or active_prediction['target_game'] != target_game: return
-    
-    emoji = f"🍯✅{ {0:'0️⃣', 1:'1️⃣', 2:'2️⃣', 3:'3️⃣'}.get(count, '✅') }" if status == 'success' else '😶❌'
-    txt = f"📡 **PRÉDICTION #{target_game}**\n🎯 Couleur: {active_prediction['suit']} {SUIT_NAMES.get(active_prediction['suit'], '')}\n🌪️ Statut: {emoji}"
     
     try:
-        await client.edit_message(CURRENT_PRED_ID, active_prediction['message_id'], txt)
-        if status in ['success', 'failed']:
+        if not active_prediction or active_prediction['target_game'] != target_game:
+            return False
+
+        suit = active_prediction['suit']
+        suit_name = get_suit_full_name(suit)
+        message_id = active_prediction['message_id']
+        
+        status_emoji = '😶❌'
+        if new_status == 'success':
+            emojis = ['🍯✅0️⃣', '🍯✅1️⃣', '🍯✅2️⃣', '🍯✅3️⃣']
+            status_emoji = emojis[check_count] if check_count < len(emojis) else '🍯✅'
+
+        updated_msg = f"📡 PRÉDICTION #{target_game}\n🎯 Couleur: {suit} {suit_name}\n🌪️ Statut: {status_emoji}"
+
+        if PREDICTION_CHANNEL_ID and PREDICTION_CHANNEL_ID != 0 and message_id > 0:
+            try:
+                await client.edit_message(PREDICTION_CHANNEL_ID, message_id, updated_msg)
+            except Exception as e:
+                logger.error(f"❌ Erreur mise à jour message: {e}")
+
+        if new_status in ['success', 'failed']:
             active_prediction = None
             waiting_for_finalization = False
-    except Exception as e: logger.error(f"Edit error: {e}")
 
-# ==========================================
-# COMMANDES ADMINISTRATEUR
-# ==========================================
+        return True
+    except Exception as e:
+        logger.error(f"Erreur update_prediction_status: {e}")
+        return False
 
-@client.on(events.NewMessage(pattern='/setpred'))
-async def cmd_setpred(event):
-    global CURRENT_PRED_ID, prediction_channel_ok
-    if event.sender_id != ADMIN_ID: return
+async def check_prediction_result(game_number: int, first_group: str):
+    global active_prediction
+    if not active_prediction: return None
     
-    args = event.text.split()
-    if len(args) < 2:
-        return await event.respond("❌ Usage: `/setpred -100xxxxxxxxxx`")
+    target_game = active_prediction['target_game']
+    target_suit = active_prediction['suit']
     
+    if game_number >= target_game and game_number <= target_game + 3:
+        check_count = game_number - target_game
+        if has_suit_in_group(first_group, target_suit):
+            await update_prediction_status(target_game, 'success', check_count)
+            return True
+        elif check_count >= 3:
+            await update_prediction_status(target_game, 'failed')
+            return False
+    return None
+
+# --- Traitement des Messages ---
+
+async def process_message(message_text: str, chat_id: int, is_finalized: bool = False):
+    global current_game_number, waiting_for_finalization, active_prediction
     try:
-        new_id = int(args[1])
-        # Test d'accès
-        clean_id = int(str(new_id).replace('-100', ''))
-        await client.get_entity(PeerChannel(clean_id))
+        game_number = extract_game_number(message_text)
+        if game_number is None: return
+
+        current_game_number = game_number
+        message_hash = f"{game_number}_{message_text[:50]}"
+        if message_hash in processed_messages: return
+        processed_messages.add(message_hash)
+
+        groups = extract_parentheses_groups(message_text)
+        if len(groups) < 1: return
+        first_group = groups[0]
+
+        if waiting_for_finalization and is_finalized:
+            await check_prediction_result(game_number, first_group)
+
+        if not waiting_for_finalization and active_prediction is None:
+            first_suit = get_first_card_suit(first_group)
+            if first_suit:
+                await send_prediction(game_number, first_suit)
+
+    except Exception as e:
+        logger.error(f"Erreur process_message: {e}")
+
+# --- Handlers Telegram ---
+
+@client.on(events.NewMessage())
+async def handle_message(event):
+    if event.chat_id == SOURCE_CHANNEL_ID:
+        await process_message(event.message.message, event.chat_id, is_finalized=False)
+
+@client.on(events.MessageEdited())
+async def handle_edited_message(event):
+    if event.chat_id == SOURCE_CHANNEL_ID:
+        is_finalized = is_message_finalized(event.message.message)
+        await process_message(event.message.message, event.chat_id, is_finalized=is_finalized)
+
+# --- COMMANDES ADMIN ---
+
+@client.on(events.NewMessage(pattern='/start'))
+async def cmd_start(event):
+    if event.is_private:
+        await event.respond(
+            "🤖 **Bot de Prédiction Baccarat**\n\n"
+            "**Commandes :**\n"
+            "• `/status` - État actuel\n"
+            "• `/setoffset <nb>` - Modifier l'offset\n"
+            "• `/setpredchannel <id>` - Définir le canal de destination\n"
+            "• `/checkchannels` - Vérifier les accès"
+        )
+
+@client.on(events.NewMessage(pattern='/setpredchannel'))
+async def cmd_setpredchannel(event):
+    global PREDICTION_CHANNEL_ID, prediction_channel_ok
+    if not event.is_private or (event.sender_id != ADMIN_ID and ADMIN_ID != 0): return
+
+    try:
+        parts = event.message.text.split()
+        if len(parts) < 2:
+            await event.respond("Usage: `/setpredchannel -100123456789`")
+            return
+
+        new_id = int(re.search(r'(-?\d+)', parts[1]).group(1))
         
-        CURRENT_PRED_ID = new_id
+        # Test d'accès
+        entity = await client.get_entity(new_id)
+        test_msg = await client.send_message(new_id, "✅ Canal lié avec succès pour les prédictions.")
+        
+        PREDICTION_CHANNEL_ID = new_id
         prediction_channel_ok = True
-        await event.respond(f"✅ **Canal de prédiction mis à jour !**\nID: `{new_id}`")
-        logger.info(f"Nouveau canal pred: {new_id}")
+        
+        await event.respond(f"✅ **Canal mis à jour** : {getattr(entity, 'title', 'Inconnu')} (`{new_id}`)")
+        await asyncio.sleep(3)
+        await client.delete_messages(new_id, test_msg.id)
     except Exception as e:
-        await event.respond(f"❌ Erreur: Le bot doit être admin du canal.\nDétail: {e}")
+        await event.respond(f"❌ Erreur : {e}")
 
-@client.on(events.NewMessage(pattern='/setsource'))
-async def cmd_setsource(event):
-    global CURRENT_SOURCE_ID, source_channel_ok
-    if event.sender_id != ADMIN_ID: return
-    
-    args = event.text.split()
-    if len(args) < 2:
-        return await event.respond("❌ Usage: `/setsource -100xxxxxxxxxx`")
-    
+@client.on(events.NewMessage(pattern='/setoffset'))
+async def cmd_setoffset(event):
+    global PREDICTION_OFFSET
+    if not event.is_private or (event.sender_id != ADMIN_ID and ADMIN_ID != 0): return
     try:
-        new_id = int(args[1])
-        await client.get_entity(new_id)
-        CURRENT_SOURCE_ID = new_id
-        source_channel_ok = True
-        await event.respond(f"✅ **Canal source mis à jour !**\nID: `{new_id}`")
-    except Exception as e:
-        await event.respond(f"❌ Erreur: {e}")
+        new_offset = int(event.message.text.split()[1])
+        PREDICTION_OFFSET = new_offset
+        await event.respond(f"✅ Offset modifié : +{new_offset}")
+    except:
+        await event.respond("Usage: `/setoffset 2`")
 
 @client.on(events.NewMessage(pattern='/status'))
 async def cmd_status(event):
-    if event.sender_id != ADMIN_ID: return
-    uptime = str(datetime.now() - start_time).split('.')[0]
-    msg = (f"📊 **STATUT**\n⏱ Uptime: {uptime}\n🎮 Jeu: #{current_game_number}\n"
-           f"📡 Source: `{CURRENT_SOURCE_ID}` ({'✅' if source_channel_ok else '❌'})\n"
-           f"🔮 Pred: `{CURRENT_PRED_ID}` ({'✅' if prediction_channel_ok else '❌'})\n"
-           f"📏 Offset: +{PREDICTION_OFFSET}")
+    if not event.is_private: return
+    msg = f"📊 **État**:\nJeu: #{current_game_number}\nOffset: +{PREDICTION_OFFSET}\nCanal Pred: `{PREDICTION_CHANNEL_ID}`"
+    if active_prediction:
+        msg += f"\n\n🔮 **Active**: #{active_prediction['target_game']} ({active_prediction['suit']})"
     await event.respond(msg)
 
-# ==========================================
-# GESTIONNAIRES DE FLUX
-# ==========================================
-
-async def process_flow(text, is_final):
-    global current_game_number
-    num = extract_game_number(text)
-    if not num: return
-    current_game_number = num
-    groups = extract_parentheses_groups(text)
-    if not groups: return
-
-    if waiting_for_finalization and is_final:
-        target = active_prediction['target_game']
-        if num == target:
-            if has_suit_in_group(groups[0], active_prediction['suit']): await update_status(target, 'success', 0)
-            else: active_prediction['check_count'] = 1
-        elif target < num <= target + 3:
-            c = num - target
-            if has_suit_in_group(groups[0], active_prediction['suit']): await update_status(target, 'success', c)
-            elif c >= 3: await update_status(target, 'failed')
+@client.on(events.NewMessage(pattern='/checkchannels'))
+async def cmd_checkchannels(event):
+    global source_channel_ok, prediction_channel_ok
+    if not event.is_private: return
+    res = "🔍 **Vérification**:\n"
+    try:
+        await client.get_entity(SOURCE_CHANNEL_ID)
+        source_channel_ok = True
+        res += "✅ Source: OK\n"
+    except Exception as e: res += f"❌ Source: {e}\n"
     
-    elif not waiting_for_finalization and active_prediction is None:
-        suit = get_first_card_suit(groups[0])
-        if suit: await send_prediction(num, suit)
+    try:
+        await client.get_entity(PREDICTION_CHANNEL_ID)
+        prediction_channel_ok = True
+        res += "✅ Prédiction: OK"
+    except Exception as e: res += f"❌ Prédiction: {e}"
+    await event.respond(res)
 
-@client.on(events.NewMessage())
-async def master_handler(event):
-    if event.chat_id == CURRENT_SOURCE_ID:
-        await process_flow(event.text, False)
+# --- Web Server & Main ---
 
-@client.on(events.MessageEdited())
-async def master_edit_handler(event):
-    if event.chat_id == CURRENT_SOURCE_ID:
-        final = '✅' in event.text or '🔰' in event.text
-        await process_flow(event.text, final)
+async def index(request):
+    return web.Response(text=f"Bot Running - Game #{current_game_number}", status=200)
 
-# ==========================================
-# INITIALISATION ET LANCEMENT
-# ==========================================
-
-async def start_web():
+async def start_web_server():
     app = web.Application()
-    app.router.add_get('/', lambda r: web.Response(text="Bot OK"))
+    app.router.add_get('/', index)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, '0.0.0.0', PORT).start()
 
 async def main():
+    await start_web_server()
+    await client.start(bot_token=BOT_TOKEN)
+    logger.info("Bot connecté !")
+    
+    # Init check
     global source_channel_ok, prediction_channel_ok
-    await start_web()
-    try:
-        await client.start(bot_token=BOT_TOKEN)
-        # Validation initiale
-        try: 
-            await client.get_entity(CURRENT_SOURCE_ID)
-            source_channel_ok = True
-        except: pass
-        try:
-            c_id = int(str(CURRENT_PRED_ID).replace('-100', ''))
-            await client.get_entity(PeerChannel(c_id))
-            prediction_channel_ok = True
-        except: pass
-        
-        logger.info("Bot prêt.")
-        await client.run_until_disconnected()
-    finally: await client.disconnect()
+    try: await client.get_entity(SOURCE_CHANNEL_ID); source_channel_ok = True
+    except: pass
+    try: await client.get_entity(PREDICTION_CHANNEL_ID); prediction_channel_ok = True
+    except: pass
+
+    await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
